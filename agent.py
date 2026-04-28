@@ -24,6 +24,8 @@ from langgraph.graph import StateGraph, START, END
 from schemas import RemittanceAdvice
 from tools import lookup_customer, lookup_open_invoices, parse_amounts_and_invoices
 
+from tracing import start_run, end_run, trace_node
+
 load_dotenv()
 
 class RoutingDecision(str, Enum):
@@ -193,7 +195,7 @@ Rules:
 """
 
 # ---------- Nodes ----------
-
+@trace_node
 def call_llm_node(state: AgentState) -> dict:
     """
     Build the messages list for the LLM, invoke, and return what's new.
@@ -230,7 +232,7 @@ def call_llm_node(state: AgentState) -> dict:
         "validation_error": None,
     }
 
-
+@trace_node
 def execute_tools_node(state: AgentState) -> dict:
     """
     Execute every tool call in the most recent assistant message and
@@ -261,7 +263,7 @@ def execute_tools_node(state: AgentState) -> dict:
 
     return {"messages": tool_messages}
 
-
+@trace_node
 def validate_output_node(state: AgentState) -> dict:
     """
     Try to parse the most recent assistant message as a RemittanceAdvice.
@@ -291,7 +293,7 @@ def validate_output_node(state: AgentState) -> dict:
 
     return {"advice": advice}
 
-
+@trace_node
 def route_by_confidence_node(state: AgentState) -> dict:
     """
     Decide where to route based on confidence band.
@@ -313,6 +315,7 @@ def route_by_confidence_node(state: AgentState) -> dict:
 
     return {"routing_decision": decision}
 
+@trace_node
 def auto_apply_node(state: AgentState) -> dict:
     """
     Mock auto-apply: in production this would write to the GL subledger,
@@ -337,7 +340,7 @@ def auto_apply_node(state: AgentState) -> dict:
     }
     return {"action_result": result}
 
-
+@trace_node
 def hitl_review_node(state: AgentState) -> dict:
     """
     Mock HITL queue: in production this would enqueue the advice into the
@@ -362,7 +365,7 @@ def hitl_review_node(state: AgentState) -> dict:
     }
     return {"action_result": result}
 
-
+@trace_node
 def exception_node(state: AgentState) -> dict:
     """
     Mock exception escalation: in production this would notify the ops team,
@@ -474,26 +477,36 @@ graph = builder.compile()
 
 def extract_remittance(remittance_text: str) -> dict:
     """
-    Run the full agent workflow on a remittance string.
-
-    Returns a dict with three fields:
-    - advice: the validated RemittanceAdvice
-    - routing_decision: which band ('auto_apply', 'hitl_review', 'exception')
-    - action_result: the structured outcome of the terminal node
+    Run the full agent workflow. Emits a trace to traces/{run_id}.jsonl.
     """
+    run_id = start_run()
     initial = AgentState(remittance_text=remittance_text)
-    final_state = graph.invoke(initial, config={"recursion_limit": 25})
+
+    try:
+        final_state = graph.invoke(initial, config={"recursion_limit": 25})
+    except Exception as e:
+        end_run(status="error", error=str(e))
+        raise
 
     if not final_state.get("advice"):
+        end_run(status="no_advice", validation_error=final_state.get("validation_error"))
         raise RuntimeError(
             f"Agent did not produce valid output. "
             f"Validation error: {final_state.get('validation_error')}"
         )
 
+    routing = final_state.get("routing_decision")
+    end_run(
+        status="ok",
+        confidence=final_state["advice"].confidence,
+        routing_decision=str(routing) if routing else None,
+    )
+
     return {
         "advice": final_state["advice"],
-        "routing_decision": final_state.get("routing_decision"),
+        "routing_decision": routing,
         "action_result": final_state.get("action_result"),
+        "run_id": run_id,
     }
 
 

@@ -19,4 +19,5 @@ venv/
 
 # OS
 .DS_Store
-Thumbs.db
+Thumbs.dbtraces/ source /home/FRACTAL/ravikumar.gurumurthy/agentic_projects/i2c-agent-week2/.venv/bin/activate
+traces/
