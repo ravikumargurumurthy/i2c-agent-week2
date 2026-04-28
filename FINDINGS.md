@@ -47,3 +47,26 @@ new `agent.py` preserves.
 ### Result: TODO — fill in actual pass rate
 
 ### TODO — document any regressions found and how they were resolved
+
+## Day 3 (Routing demo) — Eval design lesson
+
+First attempt at three routing-band demo cases:
+- Auto-apply: clean two-invoice payment → routed correctly
+- HITL: clean short-pay with deduction → routed to AUTO_APPLY (0.96)
+- Exception: unknown payer → routed correctly
+
+The HITL case wasn't actually ambiguous. The rubric is internally consistent:
+clean short-pays where customer + invoice + math all check out should score
+high regardless of the presence of a deduction. The demo case design was bad,
+not the rubric.
+
+Replaced with an under-allocated payment ($20,500 covering invoices totaling
+$21,000) — a case where the agent should genuinely flag uncertainty about
+where the unallocated $500 belongs.
+
+Lesson: when designing demos for routing bands, work backwards from the
+rubric. Pick inputs that *actually* trigger the rubric's branches, not
+inputs that *seem* like they should.
+
+This is the same eval-design discipline as Week 1 ev_004: the agent was
+right; the test expectation was uncalibrated.

@@ -49,37 +49,43 @@ def _check_allocations(actual, expected):
                 f"got {actual_reason}, expected {e['deduction_reason']}"
             )
 
-
 @pytest.mark.parametrize("case", EVAL_SET, ids=[c["id"] for c in EVAL_SET])
 def test_extraction(case):
-    """Run one eval case and assert on the expected fields."""
     result = extract_remittance(case["input"])
+    advice = result["advice"]                      # ← extract from dict
     expected = case["expected"]
 
     # 1. Customer resolution
-    assert result.payer_customer_id == expected["payer_customer_id"], (
-        f"payer_customer_id mismatch: got {result.payer_customer_id}, "
+    assert advice.payer_customer_id == expected["payer_customer_id"], (
+        f"payer_customer_id mismatch: got {advice.payer_customer_id}, "
         f"expected {expected['payer_customer_id']}"
     )
 
     # 2. Total amount
-    assert result.total_amount == Decimal(expected["total_amount"]), (
-        f"total_amount mismatch: got {result.total_amount}, "
+    assert advice.total_amount == Decimal(expected["total_amount"]), (
+        f"total_amount mismatch: got {advice.total_amount}, "
         f"expected {expected['total_amount']}"
     )
 
-    # 3. Allocations (set comparison + optional per-alloc checks)
-    _check_allocations(result.allocations, expected["allocations"])
+    # 3. Allocations
+    _check_allocations(advice.allocations, expected["allocations"])
 
     # 4. Unallocated amount (if specified)
     if "unallocated_amount" in expected:
-        assert result.unallocated_amount == Decimal(expected["unallocated_amount"]), (
-            f"unallocated_amount mismatch: got {result.unallocated_amount}, "
+        assert advice.unallocated_amount == Decimal(expected["unallocated_amount"]), (
+            f"unallocated_amount mismatch: got {advice.unallocated_amount}, "
             f"expected {expected['unallocated_amount']}"
         )
 
     # 5. Confidence band
-    assert expected["min_confidence"] <= result.confidence <= expected["max_confidence"], (
-        f"confidence {result.confidence} outside band "
+    assert expected["min_confidence"] <= advice.confidence <= expected["max_confidence"], (
+        f"confidence {advice.confidence} outside band "
         f"[{expected['min_confidence']}, {expected['max_confidence']}]"
     )
+
+    # 6. Routing decision (NEW — only checked if specified in expected)
+    if "routing_decision" in expected:
+        assert result["routing_decision"] == expected["routing_decision"], (
+            f"routing_decision mismatch: got {result['routing_decision']}, "
+            f"expected {expected['routing_decision']}"
+        )

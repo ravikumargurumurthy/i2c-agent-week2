@@ -12,6 +12,7 @@ import os
 from typing import Optional, Annotated
 from operator import add
 from dotenv import load_dotenv
+from enum import Enum
 
 from pydantic import BaseModel, Field
 from langchain_openai import AzureChatOpenAI
@@ -25,6 +26,10 @@ from tools import lookup_customer, lookup_open_invoices, parse_amounts_and_invoi
 
 load_dotenv()
 
+class RoutingDecision(str, Enum):
+    AUTO_APPLY = "auto_apply"
+    HITL_REVIEW = "hitl_review"
+    EXCEPTION = "exception"
 
 # ---------- State ----------
 class AgentState(BaseModel):
@@ -52,6 +57,15 @@ class AgentState(BaseModel):
 
     validation_retries: int = 0
     """Counter for how many repair attempts we've made."""
+
+    # --- Routing outputs ---
+    routing_decision: Optional[RoutingDecision] = None
+    """One of: 'auto_apply', 'hitl_review', 'exception'. Set by route_by_confidence."""
+
+    action_result: Optional[dict] = None
+    """The structured outcome of the terminal node — what was done, where it went,
+    what audit info was recorded. Mock for now; in production this would be the
+    return value of writing to ledger / enqueuing / escalating."""
 
 # ---------- LLM client ----------
 TOOL_REGISTRY = {
@@ -182,57 +196,37 @@ Rules:
 
 def call_llm_node(state: AgentState) -> dict:
     """
-    The LLM call node. Constructs the messages list (using state) and invokes
-    the LLM. Returns the new assistant message to be appended to state.
-
-    On the first call, prepends the system prompt and user message.
-    On subsequent calls, just adds another LLM turn given the running history.
+    Build the messages list for the LLM, invoke, and return what's new.
     """
-    # If this is the first call, seed the conversation. Otherwise, use existing.
+    # Compute what new context messages to add THIS turn
+    new_context: list[BaseMessage] = []
+
     if not state.messages:
-        msgs = [
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(
-                content=f"Extract the remittance advice from this text:\n\n{state.remittance_text}"
-            ),
-        ]
-    else:
-        msgs = list(state.messages)
-
-    # If a validation error is flagged, append it as a user message before re-invoking
-    if state.validation_error:
-        msgs.append(HumanMessage(
-            content=(
-                f"Your previous output failed validation:\n{state.validation_error}\n\n"
-                f"Fix the issues and return corrected JSON matching the RemittanceAdvice schema."
-            )
-        ))
-
-    response = llm_with_tools.invoke(msgs)
-
-    # Determine which messages to append to state.
-    # If first call: append system + user + response (full seeding).
-    # Otherwise: append the validation feedback (if any) + response.
-    new_messages = []
-    if not state.messages:
-        new_messages.extend([
+        # First turn — seed the conversation
+        new_context.extend([
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(
                 content=f"Extract the remittance advice from this text:\n\n{state.remittance_text}"
             ),
         ])
+
     if state.validation_error:
-        new_messages.append(HumanMessage(
+        # Repair turn — feed the error back
+        new_context.append(HumanMessage(
             content=(
                 f"Your previous output failed validation:\n{state.validation_error}\n\n"
                 f"Fix the issues and return corrected JSON matching the RemittanceAdvice schema."
             )
         ))
-    new_messages.append(response)
 
-    # Clear validation_error since we've fed it back
+    # Full message list = existing state + new context
+    full_messages = list(state.messages) + new_context
+
+    response = llm_with_tools.invoke(full_messages)
+
+    # Return only what's new — framework appends via the `add` reducer
     return {
-        "messages": new_messages,
+        "messages": new_context + [response],
         "validation_error": None,
     }
 
@@ -297,6 +291,99 @@ def validate_output_node(state: AgentState) -> dict:
 
     return {"advice": advice}
 
+
+def route_by_confidence_node(state: AgentState) -> dict:
+    """
+    Decide where to route based on confidence band.
+    This node only WRITES the decision to state. The actual dispatch
+    happens in the conditional edge that comes after.
+    """
+    if not state.advice:
+        # Defensive — shouldn't happen because validate_output gates this
+        return {"routing_decision": RoutingDecision.EXCEPTION}
+
+    confidence = state.advice.confidence
+
+    if confidence >= 0.95:
+        decision = RoutingDecision.AUTO_APPLY
+    elif confidence >= 0.70:
+        decision = RoutingDecision.HITL_REVIEW
+    else:
+        decision = RoutingDecision.EXCEPTION
+
+    return {"routing_decision": decision}
+
+def auto_apply_node(state: AgentState) -> dict:
+    """
+    Mock auto-apply: in production this would write to the GL subledger,
+    update invoice statuses, post the cash, and emit an audit record.
+    For Week 2 we just record what would have happened.
+    """
+    advice = state.advice
+    result = {
+        "action": "auto_apply",
+        "ledger_entries": [
+            {
+                "invoice_number": a.invoice_number,
+                "amount_applied": str(a.amount_paid),
+                "customer_id": advice.payer_customer_id,
+                "status": "would_post_to_GL",
+            }
+            for a in advice.allocations
+        ],
+        "unallocated": str(advice.unallocated_amount),
+        "confidence": advice.confidence,
+        "audit_note": "Auto-applied without human review; confidence >= 0.95",
+    }
+    return {"action_result": result}
+
+
+def hitl_review_node(state: AgentState) -> dict:
+    """
+    Mock HITL queue: in production this would enqueue the advice into the
+    analyst review tool, send a notification, and set an SLA timer.
+    """
+    advice = state.advice
+    result = {
+        "action": "hitl_review",
+        "review_queue_entry": {
+            "remittance_id": "would_be_a_uuid",
+            "payer_customer_id": advice.payer_customer_id,
+            "total_amount": str(advice.total_amount),
+            "allocations": [
+                {"invoice_number": a.invoice_number, "amount": str(a.amount_paid)}
+                for a in advice.allocations
+            ],
+            "confidence": advice.confidence,
+            "agent_notes": advice.extraction_notes,
+            "queue_priority": "normal",
+        },
+        "audit_note": "Routed to HITL queue; confidence 0.70-0.94",
+    }
+    return {"action_result": result}
+
+
+def exception_node(state: AgentState) -> dict:
+    """
+    Mock exception escalation: in production this would notify the ops team,
+    create a ticket, and route the unmatched payment to an investigation queue.
+    """
+    advice = state.advice
+    result = {
+        "action": "exception",
+        "exception_record": {
+            "reason": "low_confidence_extraction",
+            "payer_name_raw": advice.payer_name,
+            "payer_customer_id": advice.payer_customer_id,
+            "total_amount": str(advice.total_amount),
+            "extraction_notes": advice.extraction_notes,
+            "confidence": advice.confidence,
+            "escalation_level": "ops_team",
+        },
+        "audit_note": "Escalated as exception; confidence < 0.70",
+    }
+    return {"action_result": result}
+
 # ---------- Conditional edge functions ----------
 
 def after_llm(state: AgentState) -> str:
@@ -312,28 +399,38 @@ def after_llm(state: AgentState) -> str:
 
 
 def after_validation(state: AgentState) -> str:
-    """
-    After validation:
-    - If advice is set, we're done.
-    - If validation_error is set and we have retries left, loop back.
-    - If retries exhausted, end anyway (return whatever we have).
-    """
     if state.advice is not None:
-        return END
+        return "route_by_confidence"   # ← changed
     if state.validation_retries >= 2:
-        # Out of repair retries — end the loop. Caller can inspect state.advice (None)
-        # and state.validation_error.
         return END
     return "call_llm"
+
+def route_to_terminal(state: AgentState) -> str:
+    """Dispatch from route_by_confidence_node to the appropriate terminal node."""
+    decision = state.routing_decision
+    if decision == RoutingDecision.AUTO_APPLY:
+        return "auto_apply"
+    elif decision == RoutingDecision.HITL_REVIEW:
+        return "hitl_review"
+    else:
+        return "exception"
 
 # ---------- Build the graph ----------
 
 builder = StateGraph(AgentState)
 
+# Existing nodes
 builder.add_node("call_llm", call_llm_node)
 builder.add_node("execute_tools", execute_tools_node)
 builder.add_node("validate_output", validate_output_node)
 
+# New nodes
+builder.add_node("route_by_confidence", route_by_confidence_node)
+builder.add_node("auto_apply", auto_apply_node)
+builder.add_node("hitl_review", hitl_review_node)
+builder.add_node("exception", exception_node)
+
+# Existing edges (unchanged)
 builder.add_edge(START, "call_llm")
 
 builder.add_conditional_edges(
@@ -341,44 +438,90 @@ builder.add_conditional_edges(
     after_llm,
     {"execute_tools": "execute_tools", "validate_output": "validate_output"},
 )
-
-# After tool execution, always go back to the LLM
 builder.add_edge("execute_tools", "call_llm")
 
-# After validation, branch on success/retry/end
+# Updated: validate_output now routes to route_by_confidence on success
 builder.add_conditional_edges(
     "validate_output",
     after_validation,
-    {"call_llm": "call_llm", END: END},
+    {
+        "route_by_confidence": "route_by_confidence",
+        "call_llm": "call_llm",
+        END: END,
+    },
 )
 
-# Compile with a recursion ceiling matching Week 1's max_iterations spirit
+# New: dispatch from router to one of three terminals
+builder.add_conditional_edges(
+    "route_by_confidence",
+    route_to_terminal,
+    {
+        "auto_apply": "auto_apply",
+        "hitl_review": "hitl_review",
+        "exception": "exception",
+    },
+)
+
+# Each terminal goes to END
+builder.add_edge("auto_apply", END)
+builder.add_edge("hitl_review", END)
+builder.add_edge("exception", END)
+
 graph = builder.compile()
 
 
 # ---------- Public API ----------
 
-def extract_remittance(remittance_text: str) -> RemittanceAdvice:
-    """Run the agent on a remittance string and return the validated extraction."""
+def extract_remittance(remittance_text: str) -> dict:
+    """
+    Run the full agent workflow on a remittance string.
+
+    Returns a dict with three fields:
+    - advice: the validated RemittanceAdvice
+    - routing_decision: which band ('auto_apply', 'hitl_review', 'exception')
+    - action_result: the structured outcome of the terminal node
+    """
     initial = AgentState(remittance_text=remittance_text)
     final_state = graph.invoke(initial, config={"recursion_limit": 25})
 
-    # final_state is a dict (LangGraph returns dicts even from Pydantic state)
     if not final_state.get("advice"):
         raise RuntimeError(
             f"Agent did not produce valid output. "
             f"Validation error: {final_state.get('validation_error')}"
         )
-    return final_state["advice"]
+
+    return {
+        "advice": final_state["advice"],
+        "routing_decision": final_state.get("routing_decision"),
+        "action_result": final_state.get("action_result"),
+    }
 
 
 # ---------- Demo ----------
 
 if __name__ == "__main__":
-    sample = (
-        "Payment $4,300.00 from Acme Corporation via wire ref WIRE-789 for "
-        "INV-1001 ($2,500) and INV-1002 ($1,800)."
-    )
-    advice = extract_remittance(sample)
-    print("FINAL VALIDATED OUTPUT:")
-    print(advice.model_dump_json(indent=2))
+    test_cases = [
+        (
+            "Auto-apply test",
+            "Payment $4,300.00 from Acme Corporation via wire ref WIRE-789 for "
+            "INV-1001 ($2,500) and INV-1002 ($1,800).",
+        ),
+        (
+            "HITL test (under-allocated payment)",
+            "Payment from Hooli $20,500.00 for INV-6001 and INV-6002",
+        ),
+        (
+            "Exception test",
+            "Payment $5,000.00 from Random Corp for INV-9999",
+        ),
+    ]
+
+    for label, sample in test_cases:
+        print("=" * 70)
+        print(f"  {label}")
+        print("=" * 70)
+        result = extract_remittance(sample)
+        print(f"Routing decision: {result['routing_decision']}")
+        print(f"Confidence:       {result['advice'].confidence}")
+        print(f"Action result:    {result['action_result']['action']}")
+        print()

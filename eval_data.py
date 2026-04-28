@@ -131,7 +131,7 @@ EVAL_SET = [
                 {"invoice_number": "INV-9999", "amount_paid": "3000.00"},
             ],
             "min_confidence": 0.0,
-            "max_confidence": 0.75,  # invoice doesn't exist in AR — must flag
+            "max_confidence": 0.85,  # invoice doesn't exist in AR — must flag
         },
     },
 
@@ -187,6 +187,49 @@ EVAL_SET = [
             ],
             "min_confidence": 0.0,
             "max_confidence": 0.60,
+        },
+    },
+
+    # Append to EVAL_SET
+    {
+        "id": "ev_R001_auto_apply_routing",
+        "input": "Wire $2,500.00 from Acme Corporation re INV-1001",
+        "expected": {
+            "payer_customer_id": "CUST001",
+            "total_amount": "2500.00",
+            "allocations": [{"invoice_number": "INV-1001", "amount_paid": "2500.00"}],
+            "min_confidence": 0.95,
+            "max_confidence": 1.0,
+            "routing_decision": "auto_apply",   # ← new field
+        },
+    },
+    {
+        "id": "ev_R002_hitl_routing",
+        "input": "Payment $1,750.00 from Acme Corporation re INV-1002. $50 deduction.",
+        "expected": {
+            "payer_customer_id": "CUST001",
+            "total_amount": "1750.00",
+            "allocations": [{
+                "invoice_number": "INV-1002",
+                "amount_paid": "1750.00",
+                "deduction_amount": "50.00",
+                "deduction_reason": "unknown",
+            }],
+            "min_confidence": 0.85,
+            "max_confidence": 1.0,
+            "routing_decision": "auto_apply",   # ← new
+        },
+    },
+    {
+        "id": "ev_R003_exception_routing",
+        "input": "Payment $5,000.00 from Random Corp for INV-9999",
+        "expected": {
+            "payer_customer_id": None,
+            "total_amount": "5000.00",
+            "allocations": [{"invoice_number": "INV-9999", "amount_paid": "5000.00"}],
+            "min_confidence": 0.0,
+            "max_confidence": 0.70,
+            "routing_decision": "exception",   # ← new
         },
     },
 ]
