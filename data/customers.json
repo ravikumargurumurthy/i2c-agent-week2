@@ -1,0 +1,77 @@
+[
+  {
+    "customer_id": "CUST001",
+    "legal_name": "Acme Corporation",
+    "aliases": ["Acme Corp", "ACME CORP", "Acme Co."]
+  },
+  {
+    "customer_id": "CUST002",
+    "legal_name": "Acme Industries Inc",
+    "aliases": ["Acme Industries", "Acme Ind"]
+  },
+  {
+    "customer_id": "CUST003",
+    "legal_name": "Globex Industries LLC",
+    "aliases": ["Globex", "Globex Inc", "Globex Industries"]
+  },
+  {
+    "customer_id": "CUST004",
+    "legal_name": "Initech Software Solutions",
+    "aliases": ["Initech", "Initech Software"]
+  },
+  {
+    "customer_id": "CUST005",
+    "legal_name": "Umbrella Corporation",
+    "aliases": ["Umbrella", "Umbrella Corp"]
+  },
+  {
+    "customer_id": "CUST006",
+    "legal_name": "Soylent Manufacturing Co",
+    "aliases": ["Soylent", "Soylent Mfg"]
+  },
+  {
+    "customer_id": "CUST007",
+    "legal_name": "Hooli Technologies Pvt Ltd",
+    "aliases": ["Hooli", "Hooli Tech"]
+  },
+  {
+    "customer_id": "CUST008",
+    "legal_name": "Pied Piper Networks",
+    "aliases": ["Pied Piper", "PiedPiper"]
+  },
+  {
+    "customer_id": "CUST009",
+    "legal_name": "Stark Industries",
+    "aliases": ["Stark", "Stark Ind"]
+  },
+  {
+    "customer_id": "CUST010",
+    "legal_name": "Wayne Enterprises Holdings",
+    "aliases": ["Wayne Enterprises", "Wayne Ent"]
+  },
+  {
+    "customer_id": "CUST011",
+    "legal_name": "Tyrell Corporation",
+    "aliases": ["Tyrell", "Tyrell Corp"]
+  },
+  {
+    "customer_id": "CUST012",
+    "legal_name": "Cyberdyne Systems Corp",
+    "aliases": ["Cyberdyne", "Cyberdyne Sys"]
+  },
+  {
+    "customer_id": "CUST013",
+    "legal_name": "Massive Dynamic LLC",
+    "aliases": ["Massive Dynamic", "MassiveD"]
+  },
+  {
+    "customer_id": "CUST014",
+    "legal_name": "Oscorp Industries",
+    "aliases": ["Oscorp"]
+  },
+  {
+    "customer_id": "CUST015",
+    "legal_name": "Wonka Industries Inc",
+    "aliases": ["Wonka", "Wonka Ind"]
+  }
+]
