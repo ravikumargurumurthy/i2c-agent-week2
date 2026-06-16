@@ -1,0 +1,22 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.3, pluggy-1.6.0 -- /home/FRACTAL/ravikumar.gurumurthy/agentic_projects/i2c-agent-week2/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/FRACTAL/ravikumar.gurumurthy/agentic_projects/i2c-agent-week2
+plugins: anyio-4.13.0, langsmith-0.7.37
+collecting ... collected 13 items
+
+test_agent.py::test_extraction[ev_001_clean_single_invoice] PASSED       [  7%]
+test_agent.py::test_extraction[ev_002_clean_two_invoices] PASSED         [ 15%]
+test_agent.py::test_extraction[ev_003_short_pay_with_reason] PASSED      [ 23%]
+test_agent.py::test_extraction[ev_004_short_pay_no_reason] PASSED        [ 30%]
+test_agent.py::test_extraction[ev_005_alias_match] PASSED                [ 38%]
+test_agent.py::test_extraction[ev_006_ambiguous_customer] PASSED         [ 46%]
+test_agent.py::test_extraction[ev_007_invoice_not_open] PASSED           [ 53%]
+test_agent.py::test_extraction[ev_008_under_allocated] PASSED            [ 61%]
+test_agent.py::test_extraction[ev_009_over_payment] PASSED               [ 69%]
+test_agent.py::test_extraction[ev_010_unknown_payer] PASSED              [ 76%]
+test_agent.py::test_extraction[ev_R001_auto_apply_routing] PASSED        [ 84%]
+test_agent.py::test_extraction[ev_R002_hitl_routing] PASSED              [ 92%]
+test_agent.py::test_extraction[ev_R003_exception_routing] PASSED         [100%]
+
+======================== 13 passed in 94.24s (0:01:34) =========================
